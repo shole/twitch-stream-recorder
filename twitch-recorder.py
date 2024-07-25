@@ -7,6 +7,7 @@ import subprocess
 import sys
 import shutil
 import time
+from multiprocessing import Process
 
 import requests
 
@@ -27,6 +28,7 @@ class TwitchRecorder:
         self.ffmpeg_path = "ffmpeg"
         self.disable_ffmpeg = False
         self.refresh = 15
+        self.refreshoffset = 0
         self.root_path = config.root_path
 
         # user configuration
@@ -40,6 +42,13 @@ class TwitchRecorder:
                          + self.client_secret + "&grant_type=client_credentials"
         self.url = "https://api.twitch.tv/helix/streams"
         self.access_token = self.fetch_access_token()
+
+    def nextrefresh(self): # delay to next clock normalized refresh interval in seconds
+        timeseconds = int(time.time()) + self.refreshoffset
+        timeleft = ( self.refresh - ( timeseconds % self.refresh ) )
+        if timeleft < self.refresh // 2: # too close, wait for next refresh period
+            timeleft += self.refresh
+        return timeleft
 
     def fetch_access_token(self):
         token_response = requests.post(self.token_url, timeout=15)
@@ -121,16 +130,17 @@ class TwitchRecorder:
     def loop_check(self, recorded_path, processed_path):
         while True:
             status, info = self.check_user()
+
             if status == TwitchResponseStatus.NOT_FOUND:
                 logging.error("username not found, invalid username or typo")
-                time.sleep(self.refresh)
+                time.sleep(self.nextrefresh())
             elif status == TwitchResponseStatus.ERROR:
                 logging.error("%s unexpected error. will try again in 5 minutes",
                               datetime.datetime.now().strftime("%Hh%Mm%Ss"))
                 time.sleep(300)
             elif status == TwitchResponseStatus.OFFLINE:
-                logging.info("%s currently offline, checking again in %s seconds", self.username, self.refresh)
-                time.sleep(self.refresh)
+                logging.info("%s currently offline, checking again in %s seconds", self.username, self.nextrefresh())
+                time.sleep(self.nextrefresh())
             elif status == TwitchResponseStatus.UNAUTHORIZED:
                 logging.info("unauthorized, will attempt to log back in immediately")
                 self.access_token = self.fetch_access_token()
@@ -160,14 +170,30 @@ class TwitchRecorder:
                     logging.info("skip fixing, file not found")
 
                 logging.info("processing is done, going back to checking...")
-                time.sleep(self.refresh)
+                time.sleep(self.nextrefresh())
 
+def TwitchRecorderProcess(pconfig):
+    twitch_recorder = TwitchRecorder()
+    twitch_recorder.refresh = pconfig['refresh'] * len(pconfig['usernames'])
+    twitch_recorder.refreshoffset = pconfig['refresh'] * pconfig['useridx']
+    twitch_recorder.username = pconfig['usernames'][pconfig['useridx']]
+    if pconfig['quality'] is not None:
+        twitch_recorder.quality = pconfig['quality']
+    if pconfig['disable_ffmpeg'] is not None:
+        twitch_recorder.disable_ffmpeg = pconfig['disable_ffmpeg']
+    twitch_recorder.run()
 
 def main(argv):
-    twitch_recorder = TwitchRecorder()
     usage_message = "twitch-recorder.py -u <username> -q <quality>"
     logging.basicConfig(filename="twitch-recorder.log", level=logging.INFO)
     logging.getLogger().addHandler(logging.StreamHandler())
+
+    pconfig = dict()
+    pconfig['useridx']=0
+    pconfig['usernames']=None
+    pconfig['refresh']=15 # per user
+    pconfig['quality']=None
+    pconfig['disable_ffmpeg']=None
 
     try:
         opts, args = getopt.getopt(argv, "hu:q:l:", ["username=", "quality=", "log=", "logging=", "disable-ffmpeg"])
@@ -179,9 +205,9 @@ def main(argv):
             print(usage_message)
             sys.exit()
         elif opt in ("-u", "--username"):
-            twitch_recorder.username = arg
+            pconfig['usernames'] = arg.replace(" ", "").split(",")
         elif opt in ("-q", "--quality"):
-            twitch_recorder.quality = arg
+            pconfig['quality'] = arg
         elif opt in ("-l", "--log", "--logging"):
             logging_level = getattr(logging, arg.upper(), None)
             if not isinstance(logging_level, int):
@@ -189,10 +215,22 @@ def main(argv):
             logging.basicConfig(level=logging_level)
             logging.info("logging configured to %s", arg.upper())
         elif opt == "--disable-ffmpeg":
-            twitch_recorder.disable_ffmpeg = True
+            pconfig['disable_ffmpeg'] = True
             logging.info("ffmpeg disabled")
 
-    twitch_recorder.run()
+    if pconfig['usernames'] is None:
+        pconfig['usernames']=config.username
+    if not isinstance(pconfig['usernames'], list):
+        pconfig['usernames']=[pconfig['usernames']]
+
+    processes=[]
+    for useridx in range(len(pconfig['usernames'])):
+        pconfig['useridx']=useridx
+        p = Process(target=TwitchRecorderProcess, args=(pconfig,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
 
 
 if __name__ == "__main__":
