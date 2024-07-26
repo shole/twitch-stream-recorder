@@ -21,11 +21,13 @@ root_path = "/home/abathur/Videos/twitch"
 username = ["forsen", "cinna"]
 client_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 client_secret = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+streamlink_config = ["--twitch-disable-ads"]
 ```
 `root_path` - path to a folder where you want your VODs to be saved to  
 `username` - name of the streamer or streamers you want to record by default, as an array  
 `client_id` - you can grab this from [here](https://dev.twitch.tv/console/apps) once you register your application  
-`client_secret` - you generate this [here](https://dev.twitch.tv/console/apps) as well, for your registered application
+`client_secret` - you generate this [here](https://dev.twitch.tv/console/apps) as well, for your registered application  
+`streamlink_config` - extra parameters for streamlink  
 
 ## Running script
 The script will be logging to a console and to a file `twitch-recorder.log`

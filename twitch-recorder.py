@@ -13,6 +13,15 @@ import requests
 
 import config
 
+def flatten(itr): # standalone array flatten
+    if type(itr) in (str,bytes):
+        yield itr
+    else:
+        for x in itr:
+            try:
+                yield from flatten(x)
+            except TypeError:
+                yield x
 
 class TwitchResponseStatus(enum.Enum):
     ONLINE = 0
@@ -160,9 +169,12 @@ class TwitchRecorder:
                 processed_filename = os.path.join(processed_path, filename)
 
                 # start streamlink process
-                subprocess.call(
-                    ["streamlink", "--twitch-disable-ads", "twitch.tv/" + self.username, self.quality,
-                     "-o", recorded_filename])
+                subprocess.call(list(flatten([
+                    "streamlink",
+                    config.streamlink_config,
+                    "twitch.tv/" + self.username, self.quality,
+                    "-o", recorded_filename
+                ])))
 
                 logging.info("recording stream is done, processing video file")
                 if os.path.exists(recorded_filename) is True:
