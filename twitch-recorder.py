@@ -43,10 +43,10 @@ class TwitchRecorder:
         self.url = "https://api.twitch.tv/helix/streams"
         self.access_token = self.fetch_access_token()
 
-    def nextrefresh(self): # delay to next clock normalized refresh interval in seconds
+    def nextrefresh(self, allowsoon=False): # delay to next clock normalized refresh interval in seconds
         timeseconds = int(time.time()) + self.refreshoffset
         timeleft = ( self.refresh - ( timeseconds % self.refresh ) )
-        if timeleft < self.refresh // 2: # too close, wait for next refresh period
+        if timeleft < self.refresh // 2 and not allowsoon: # too close, wait for next refresh period
             timeleft += self.refresh
         return timeleft
 
@@ -128,6 +128,7 @@ class TwitchRecorder:
         return status, info
 
     def loop_check(self, recorded_path, processed_path):
+        time.sleep(self.nextrefresh(True)) # also delay first passes
         while True:
             status, info = self.check_user()
 
