@@ -99,6 +99,45 @@ class TwitchRecorder:
                      self.username, self.refresh, self.quality)
         self.loop_check(recorded_path, processed_path)
 
+    def process_inactive_usernames(self):
+        usernames = config.username
+        if not isinstance(usernames, list):
+            usernames = [usernames]
+
+        recorded_users_path = os.path.join(self.root_path, "recorded")
+        recorded_usernames = [f for f in os.listdir(recorded_users_path) if os.path.isdir(os.path.join(recorded_users_path, f))]
+        for username in recorded_usernames:
+            if username not in usernames:
+                # path to recorded stream
+                recorded_path = os.path.join(self.root_path, "recorded", username)
+
+                # path to finished video, errors removed
+                processed_path = os.path.join(self.root_path, "processed", username)
+
+                # create directory for recordedPath and processedPath if not exist
+                if os.path.isdir(recorded_path) is False:
+                    os.makedirs(recorded_path)
+                if os.path.isdir(processed_path) is False:
+                    os.makedirs(processed_path)
+
+                # make sure the interval to check user availability is not less than 15 seconds
+                if self.refresh < 15:
+                    logging.warning("check interval should not be lower than 15 seconds")
+                    self.refresh = 15
+                    logging.info("system set check interval to 15 seconds")
+
+                # fix videos from previous recording session
+                try:
+                    video_list = [f for f in os.listdir(recorded_path) if os.path.isfile(os.path.join(recorded_path, f))]
+                    if len(video_list) > 0:
+                        logging.info("processing previously recorded files")
+                    for f in video_list:
+                        recorded_filename = os.path.join(recorded_path, f)
+                        processed_filename = os.path.join(processed_path, f)
+                        self.process_recorded_file(recorded_filename, processed_filename)
+                except Exception as e:
+                    logging.error(e)
+
     def process_recorded_file(self, recorded_filename, processed_filename):
         if self.disable_ffmpeg:
             logging.info("moving: %s", recorded_filename)
@@ -196,6 +235,10 @@ def TwitchRecorderProcess(pconfig):
         twitch_recorder.disable_ffmpeg = pconfig['disable_ffmpeg']
     twitch_recorder.run()
 
+def TwitchRecorderInactiveProcessor():
+    twitch_recorder = TwitchRecorder()
+    twitch_recorder.process_inactive_usernames()
+
 def main(argv):
     usage_message = "twitch-recorder.py -u <username> -q <quality>"
     logging.basicConfig(filename="twitch-recorder.log", level=logging.INFO)
@@ -237,11 +280,17 @@ def main(argv):
         pconfig['usernames']=[pconfig['usernames']]
 
     processes=[]
+
+    p = Process(target=TwitchRecorderInactiveProcessor) # process unfollowed recordings
+    p.start()
+    processes.append(p)
+
     for useridx in range(len(pconfig['usernames'])):
         pconfig['useridx']=useridx
         p = Process(target=TwitchRecorderProcess, args=(pconfig,))
         p.start()
         processes.append(p)
+
     for p in processes:
         p.join()
 
