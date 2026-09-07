@@ -23,6 +23,16 @@ def flatten(itr): # standalone array flatten
             except TypeError:
                 yield x
 
+def setup_logging(level=logging.INFO):
+    # must run in every process: python 3.14 switched the multiprocessing default
+    # start method to "forkserver", so children no longer inherit this config
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(filename="twitch-recorder.log", level=level,
+                            format="%(asctime)s %(process)d %(message)s")
+        root.addHandler(logging.StreamHandler())
+    root.setLevel(level)
+
 class TwitchResponseStatus(enum.Enum):
     ONLINE = 0
     OFFLINE = 1
@@ -35,7 +45,7 @@ class TwitchRecorder:
     def __init__(self):
         # global configuration
         self.ffmpeg_path = "ffmpeg"
-        self.disable_ffmpeg = False
+        self.disable_ffmpeg = True
         self.refresh = 15
         self.refreshoffset = 0
         self.root_path = config.root_path
@@ -225,6 +235,7 @@ class TwitchRecorder:
                 time.sleep(self.nextrefresh())
 
 def TwitchRecorderProcess(pconfig):
+    setup_logging(pconfig['loglevel'])
     twitch_recorder = TwitchRecorder()
     twitch_recorder.refresh = pconfig['refresh'] * len(pconfig['usernames'])
     twitch_recorder.refreshoffset = pconfig['refresh'] * pconfig['useridx']
@@ -235,14 +246,14 @@ def TwitchRecorderProcess(pconfig):
         twitch_recorder.disable_ffmpeg = pconfig['disable_ffmpeg']
     twitch_recorder.run()
 
-def TwitchRecorderInactiveProcessor():
+def TwitchRecorderInactiveProcessor(pconfig):
+    setup_logging(pconfig['loglevel'])
     twitch_recorder = TwitchRecorder()
     twitch_recorder.process_inactive_usernames()
 
 def main(argv):
     usage_message = "twitch-recorder.py -u <username> -q <quality>"
-    logging.basicConfig(filename="twitch-recorder.log", level=logging.INFO)
-    logging.getLogger().addHandler(logging.StreamHandler())
+    setup_logging()
 
     pconfig = dict()
     pconfig['useridx']=0
@@ -250,6 +261,7 @@ def main(argv):
     pconfig['refresh']=15 # per user
     pconfig['quality']=None
     pconfig['disable_ffmpeg']=None
+    pconfig['loglevel']=logging.INFO
 
     try:
         opts, args = getopt.getopt(argv, "hu:q:l:", ["username=", "quality=", "log=", "logging=", "disable-ffmpeg"])
@@ -268,7 +280,8 @@ def main(argv):
             logging_level = getattr(logging, arg.upper(), None)
             if not isinstance(logging_level, int):
                 raise ValueError("invalid log level: %s" % logging_level)
-            logging.basicConfig(level=logging_level)
+            pconfig['loglevel'] = logging_level
+            setup_logging(logging_level)
             logging.info("logging configured to %s", arg.upper())
         elif opt == "--disable-ffmpeg":
             pconfig['disable_ffmpeg'] = True
@@ -281,7 +294,7 @@ def main(argv):
 
     processes=[]
 
-    p = Process(target=TwitchRecorderInactiveProcessor) # process unfollowed recordings
+    p = Process(target=TwitchRecorderInactiveProcessor, args=(pconfig,)) # process unfollowed recordings
     p.start()
     processes.append(p)
 
